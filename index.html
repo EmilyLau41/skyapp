@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>每日天空紀錄</title>
+    <script src="https://www.gstatic.com/firebasejs/9.x/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.x/firebase-storage-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.x/firebase-firestore-compat.js"></script>
+    
+    <style>
+        :root {
+            --primary-blue: #4a90e2;
+            --sky-gradient: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%);
+            --glass: rgba(255, 255, 255, 0.8);
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+            background: var(--sky-gradient);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        /* 標題區域 */
+        header {
+            text-align: center;
+            padding: 50px 20px;
+            color: white;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        header h1 { margin: 0; font-size: 2.5rem; letter-spacing: 2px; }
+        header p { opacity: 0.9; margin-top: 10px; }
+
+        /* 上傳控制區 */
+        .upload-card {
+            background: var(--glass);
+            backdrop-filter: blur(10px);
+            max-width: 500px;
+            margin: -30px auto 40px;
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .custom-file-upload {
+            display: inline-block;
+            padding: 12px 30px;
+            cursor: pointer;
+            background: var(--primary-blue);
+            color: white;
+            border-radius: 50px;
+            font-weight: bold;
+            transition: 0.3s;
+            box-shadow: 0 4px 15px rgba(74, 144, 226, 0.3);
+        }
+
+        .custom-file-upload:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(74, 144, 226, 0.4); }
+
+        #fileInput { display: none; }
+
+        /* 相簿網格 */
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 25px;
+            padding: 0 20px 50px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .sky-item {
+            background: white;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            transition: 0.3s;
+            position: relative;
+        }
+
+        .sky-item:hover { transform: scale(1.03); }
+
+        .sky-item img {
+            width: 100%;
+            height: 250px;
+            object-fit: cover; /* 確保照片裁切美觀 */
+            display: block;
+        }
+
+        .sky-info {
+            padding: 15px;
+            background: white;
+            font-size: 0.9rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .date-tag { color: #888; }
+        
+        /* 載入動畫 */
+        #loading { font-size: 0.9rem; color: var(--primary-blue); margin-top: 10px; display: none; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>SKY</h1>
+        <p>收集每一天的雲彩與心情</p>
+    </header>
+
+    <div class="upload-card">
+        <label for="fileInput" class="custom-file-upload">
+            捕捉今天的天空👻
+        </label>
+        <input type="file" id="fileInput" accept="image/*" onchange="uploadSky()">
+        <div id="loading">🚀 正在同步到雲端...</div>
+    </div>
+
+    <div class="gallery" id="gallery">
+        </div>
+
+    <script>
+        // --- 這裡放入你之前的 Firebase 初始化代碼 ---
+        const firebaseConfig = {
+            apiKey: "你的金鑰",
+            // ... 其他配置
+        };
+        firebase.initializeApp(firebaseConfig);
+        const storage = firebase.storage();
+        const db = firebase.firestore();
+
+        async function uploadSky() {
+            const file = document.getElementById('fileInput').files[0];
+            if (!file) return;
+
+            document.getElementById('loading').style.display = 'block';
+
+            try {
+                const storageRef = storage.ref(`skies/${Date.now()}_${file.name}`);
+                await storageRef.put(file);
+                const downloadURL = await storageRef.getDownloadURL();
+
+                await db.collection("dailySkies").add({
+                    imageUrl: downloadURL,
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                alert("上傳成功！");
+            } catch (e) {
+                console.error(e);
+                alert("上傳失敗，請檢查網路。");
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // 監聽並美化輸出
+        db.collection("dailySkies").orderBy("timestamp", "desc").onSnapshot((snapshot) => {
+            const gallery = document.getElementById('gallery');
+            gallery.innerHTML = "";
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                const dateStr = data.timestamp ? data.timestamp.toDate().toLocaleDateString('zh-TW') : '剛剛';
+                const html = `
+                    <div class="sky-item">
+                        <img src="${data.imageUrl}" alt="Sky">
+                        <div class="sky-info">
+                            <span class="date-tag">🗓️ ${dateStr}</span>
+                            <span>☁️</span>
+                        </div>
+                    </div>
+                `;
+                gallery.innerHTML += html;
+            });
+        });
+    </script>
+</body>
+</html>
