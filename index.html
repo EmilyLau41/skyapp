@@ -3,10 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>每日天空紀錄</title>
-    <script src="https://www.gstatic.com/firebasejs/9.x/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.x/firebase-storage-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.x/firebase-firestore-compat.js"></script>
+    <title>每日天空紀錄 | Sky Diary</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
     <style>
         :root {
@@ -24,7 +23,6 @@
             color: #333;
         }
 
-        /* 標題區域 */
         header {
             text-align: center;
             padding: 50px 20px;
@@ -35,7 +33,6 @@
         header h1 { margin: 0; font-size: 2.5rem; letter-spacing: 2px; }
         header p { opacity: 0.9; margin-top: 10px; }
 
-        /* 上傳控制區 */
         .upload-card {
             background: var(--glass);
             backdrop-filter: blur(10px);
@@ -63,7 +60,6 @@
 
         #fileInput { display: none; }
 
-        /* 相簿網格 */
         .gallery {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -79,7 +75,7 @@
             overflow: hidden;
             box-shadow: 0 5px 15px rgba(0,0,0,0.08);
             transition: 0.3s;
-            position: relative;
+            animation: fadeIn 0.6s ease forwards;
         }
 
         .sky-item:hover { transform: scale(1.03); }
@@ -87,7 +83,7 @@
         .sky-item img {
             width: 100%;
             height: 250px;
-            object-fit: cover; /* 確保照片裁切美觀 */
+            object-fit: cover;
             display: block;
         }
 
@@ -102,8 +98,12 @@
 
         .date-tag { color: #888; }
         
-        /* 載入動畫 */
-        #loading { font-size: 0.9rem; color: var(--primary-blue); margin-top: 10px; display: none; }
+        #loading { font-size: 0.9rem; color: var(--primary-blue); margin-top: 15px; display: none; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 <body>
@@ -115,7 +115,7 @@
 
     <div class="upload-card">
         <label for="fileInput" class="custom-file-upload">
-            捕捉今天的天空👻
+            捕捉今天的天空 ☁️
         </label>
         <input type="file" id="fileInput" accept="image/*" onchange="uploadSky()">
         <div id="loading">🚀 正在同步到雲端...</div>
@@ -125,58 +125,94 @@
         </div>
 
     <script>
-        // --- 這裡放入你之前的 Firebase 初始化代碼 ---
-        const firebaseConfig = {
-            apiKey: "你的金鑰",
-            // ... 其他配置
-        };
-        firebase.initializeApp(firebaseConfig);
-        const storage = firebase.storage();
-        const db = firebase.firestore();
+        // --- 1. Supabase 配置 ---
+        const SUPABASE_URL = 'https://dhypkutxhcfjpzmlufxr.supabase.co';
+        const SUPABASE_KEY = 'YeyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRoeXBrdXR4aGNmanB6bWx1ZnhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwOTA0OTQsImV4cCI6MjA4NTY2NjQ5NH0.0wlQw1SlkDoThRgemcyhHIg-PnsSjf50vG0Osb8kbWU';
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+        const BUCKET_NAME = 'sky_images';
+        const TABLE_NAME = 'daily_skies';
+
+        // --- 2. 上傳功能 ---
         async function uploadSky() {
-            const file = document.getElementById('fileInput').files[0];
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            const loadingText = document.getElementById('loading');
+
             if (!file) return;
 
-            document.getElementById('loading').style.display = 'block';
+            loadingText.style.display = 'block';
 
             try {
-                const storageRef = storage.ref(`skies/${Date.now()}_${file.name}`);
-                await storageRef.put(file);
-                const downloadURL = await storageRef.getDownloadURL();
+                // 產生唯一檔名避免衝突
+                const fileExt = file.name.split('.').pop();
+                const fileName = `${Date.now()}.${fileExt}`;
 
-                await db.collection("dailySkies").add({
-                    imageUrl: downloadURL,
-                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
-                });
+                // A. 上傳到 Storage
+                const { data: uploadData, error: uploadError } = await supabaseClient.storage
+                    .from(BUCKET_NAME)
+                    .upload(fileName, file);
+
+                if (uploadError) throw uploadError;
+
+                // B. 取得公開連結
+                const { data: publicUrlData } = supabaseClient.storage
+                    .from(BUCKET_NAME)
+                    .getPublicUrl(fileName);
+
+                const imageUrl = publicUrlData.publicUrl;
+
+                // C. 寫入資料庫
+                const { error: dbError } = await supabaseClient
+                    .from(TABLE_NAME)
+                    .insert([{ image_url: imageUrl }]);
+
+                if (dbError) throw dbError;
+
                 alert("上傳成功！");
-            } catch (e) {
-                console.error(e);
-                alert("上傳失敗，請檢查網路。");
+                fetchSkies(); // 重新整理
+            } catch (error) {
+                console.error('Error:', error.message);
+                alert("上傳失敗，請檢查 Supabase 設定與權限。");
             } finally {
-                document.getElementById('loading').style.display = 'none';
+                loadingText.style.display = 'none';
+                fileInput.value = ""; // 重設上傳鈕
             }
         }
 
-        // 監聽並美化輸出
-        db.collection("dailySkies").orderBy("timestamp", "desc").onSnapshot((snapshot) => {
+        // --- 3. 獲取資料功能 ---
+        async function fetchSkies() {
+            const { data, error } = await supabaseClient
+                .from(TABLE_NAME)
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (error) {
+                console.error('Fetch error:', error);
+                return;
+            }
+
             const gallery = document.getElementById('gallery');
-            gallery.innerHTML = "";
-            snapshot.forEach((doc) => {
-                const data = doc.data();
-                const dateStr = data.timestamp ? data.timestamp.toDate().toLocaleDateString('zh-TW') : '剛剛';
-                const html = `
+            gallery.innerHTML = data.map(item => {
+                const dateStr = new Date(item.created_at).toLocaleDateString('zh-TW', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
+                return `
                     <div class="sky-item">
-                        <img src="${data.imageUrl}" alt="Sky">
+                        <img src="${item.image_url}" alt="Sky Photo" loading="lazy">
                         <div class="sky-info">
                             <span class="date-tag">🗓️ ${dateStr}</span>
-                            <span>☁️</span>
+                            <span>✨</span>
                         </div>
                     </div>
                 `;
-                gallery.innerHTML += html;
-            });
-        });
+            }).join('');
+        }
+
+        // 頁面開啟時自動載入
+        window.onload = fetchSkies;
     </script>
 </body>
 </html>
